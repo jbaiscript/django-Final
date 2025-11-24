@@ -1,12 +1,11 @@
 from django.contrib import admin
+from django.contrib.auth.models import User
+from .models import Admin, Customer, Seller
 
 # Register your models here.
-
-
-from .models import * 
-admin.site.register(User)
-# admin.site.register(Admin)
-# admin.site.register(Customer)
+admin.site.register(Admin)
+admin.site.register(Customer)
+admin.site.register(Seller)
 # Register your models here.
 
 

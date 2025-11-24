@@ -24,10 +24,10 @@ class StatusofDelivery(models.Model):
 
 class Payment(models.Model):
     class PaymentChoice(models.TextChoices):
-        COD = "Cash on Delivery",
-        MAYA = "Pay Maya",
-        G_CASH = "G-Cash",
-        BPI = "B.P.I",
+        COD = "Cash on Delivery"
+        MAYA = "Pay Maya"
+        G_CASH = "G-Cash"
+        BPI = "B.P.I"
         GO_TYME = "Go Tyme"
         OTHERS = "Others"
    
@@ -104,7 +104,7 @@ class Order(models.Model):
     order_item = models.ManyToManyField(OrderItem)
     
     def __str__(self):
-        return {self.order_item}
+        return f"Order {self.number} - Status: {self.status}"
 
 
 

@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 
 # Create your models here.
 
-"""
+
 class Admin(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="is_admin")
     
@@ -25,15 +25,15 @@ class Customer(models.Model):
     address = models.CharField(max_length=250) 
     profile = models.ImageField(upload_to="profile/", default="profile/default.jpg")
 
-"""
-
-
-from django.contrib.auth.models import AbstractUser
 
 
 
-class User(AbstractUser):
-    email = models.EmailField(max_length=254, unique=True)
+# from django.contrib.auth.models import AbstractUser
+
+
+
+# class User(AbstractUser):
+#     email = models.EmailField(max_length=254, unique=True)
     
     
     
