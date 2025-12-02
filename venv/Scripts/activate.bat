@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\James\Documents\PROGRAM-FILES\PYTHON\james\venv
+set VIRTUAL_ENV=C:\Users\James\Documents\PROGRAM-FILES\PYTHON\james\django-Final - Copy - Copy\venv
 
 if not defined PROMPT set PROMPT=$P$G
 

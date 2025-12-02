@@ -1,0 +1,485 @@
+# Postman Testing Guide for Django E-commerce Application
+
+## Table of Contents
+1. [Setup & Configuration](#setup--configuration)
+2. [Authentication](#authentication)
+3. [Product Management](#product-management)
+4. [Order & Payment Management](#order--payment-management)
+5. [Discount & Promotions](#discount--promotions)
+6. [Seller Statistics](#seller-statistics)
+7. [Inventory Management](#inventory-management)
+8. [Expected Responses](#expected-responses)
+
+---
+
+## Setup & Configuration
+
+### Environment Variables
+Create a Postman environment with these variables:
+- `BASE_URL`: http://127.0.0.1:8000
+- `API_PREFIX`: /api
+- `TOKEN`: [Your authentication token will be stored here after login]
+
+### Headers to Set
+- Content-Type: application/json
+- Authorization: Bearer {{TOKEN}} (for authenticated endpoints)
+
+---
+
+## Authentication
+
+### 1. User Registration
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/auth/
+**Method**: POST
+**Body** (raw JSON):
+```json
+{
+  "email": "test@example.com",
+  "password": "securepassword123",
+  "first_name": "Test",
+  "last_name": "User",
+  "phone_number": "+1234567890",
+  "role": "customer"
+}
+```
+**Success Response**: 201 Created with user data and token
+
+### 2. User Login
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/auth/
+**Method**: POST
+**Body** (raw JSON):
+```json
+{
+  "email": "test@example.com",
+  "password": "securepassword123"
+}
+```
+**Success Response**: 200 OK with token
+**Action**: Set environment variable `TOKEN` to `response.token`
+
+### 3. Seller Registration
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/auth/seller/register/
+**Method**: POST
+**Body** (raw JSON):
+```json
+{
+  "email": "seller@example.com",
+  "password": "securepassword123",
+  "first_name": "Test",
+  "last_name": "Seller",
+  "phone_number": "+1234567890"
+}
+```
+**Success Response**: 201 Created with user data
+
+---
+
+## Product Management
+
+### 1. Create Product (Seller only)
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/product/
+**Method**: POST
+**Headers**: 
+- Authorization: Bearer {{TOKEN}}
+**Body** (raw JSON):
+```json
+{
+  "name": "Sample Product",
+  "description": "Description of the sample product",
+  "price": 29.99,
+  "stock": 50
+}
+```
+**Success Response**: 201 Created with product data
+
+### 2. List All Products
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/product/
+**Method**: GET
+**Success Response**: 200 OK with list of products
+
+### 3. Get Specific Product
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/product/{{product_id}}/
+**Method**: GET
+**Path Variables**:
+- product_id: ID of the product to retrieve
+**Success Response**: 200 OK with product data
+
+### 4. Update Product (Seller only)
+**Endpoint**: PUT {{BASE_URL}}{{API_PREFIX}}/product/{{product_id}}/
+**Method**: PUT
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the product to update
+**Body** (raw JSON):
+```json
+{
+  "name": "Updated Product Name",
+  "description": "Updated description",
+  "price": 39.99,
+  "stock": 30
+}
+```
+**Success Response**: 200 OK with updated product data
+
+### 5. Partial Update Product (Seller only)
+**Endpoint**: PATCH {{BASE_URL}}{{API_PREFIX}}/product/{{product_id}}/
+**Method**: PATCH
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the product to update
+**Body** (raw JSON):
+```json
+{
+  "price": 45.99,
+  "stock": 25
+}
+```
+**Success Response**: 200 OK with updated product data
+
+### 6. Delete Product (Seller only)
+**Endpoint**: DELETE {{BASE_URL}}{{API_PREFIX}}/product/{{product_id}}/
+**Method**: DELETE
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the product to delete
+**Success Response**: 204 No Content
+
+---
+
+## Shopping Lists & Cart Management (Customer only)
+
+### 1. Create Shopping List
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/
+**Method**: POST
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Body** (raw JSON):
+```json
+{
+  "name": "My Shopping List",
+  "description": "Items I want to purchase later"
+}
+```
+**Success Response**: 201 Created with shopping list data
+
+### 2. Add Items to Shopping List
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/{{shopping_list_id}}/items/
+**Method**: POST
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- shopping_list_id: ID of the shopping list to add items to
+**Body** (raw JSON):
+```json
+{
+  "product_id": 1,
+  "quantity": 3
+}
+```
+**Success Response**: 201 Created with shopping list item data
+
+### 3. List Shopping Lists
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Success Response**: 200 OK with list of shopping lists
+
+### 4. Get Shopping List Items
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/{{shopping_list_id}}/items/
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- shopping_list_id: ID of the shopping list to get items from
+**Success Response**: 200 OK with list of items in the shopping list
+
+### 5. Update Shopping List Item
+**Endpoint**: PUT/PATCH {{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/{{shopping_list_id}}/items/{{item_id}}/
+**Method**: PUT or PATCH
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- shopping_list_id: ID of the shopping list
+- item_id: ID of the shopping list item to update
+**Body** (raw JSON):
+```json
+{
+  "quantity": 5
+}
+```
+**Success Response**: 200 OK with updated shopping list item data
+
+### 6. Delete Shopping List Item
+**Endpoint**: DELETE {{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/{{shopping_list_id}}/items/{{item_id}}/
+**Method**: DELETE
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- shopping_list_id: ID of the shopping list
+- item_id: ID of the shopping list item to delete
+**Success Response**: 204 No Content
+
+## Order & Payment Management
+
+### 1. Create Order (Customer only)
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/orders/
+**Method**: POST
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Body** (raw JSON):
+```json
+{
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": 2
+    },
+    {
+      "product_id": 2,
+      "quantity": 1
+    }
+  ],
+  "card_number": "1234567890123456",
+  "payment": "Cash on Delivery"
+}
+```
+**Success Response**: 201 Created with order data
+**Note**: This endpoint reduces product stock automatically
+
+### 2. List Customer Orders
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/orders/
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Success Response**: 200 OK with list of customer's orders
+
+### 3. Get Specific Order
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/orders/{{order_number}}/
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- order_number: UUID of the order to retrieve
+**Success Response**: 200 OK with order data
+
+### 4. Delete Order (Customer only)
+**Endpoint**: DELETE {{BASE_URL}}{{API_PREFIX}}/orders/{{order_number}}/
+**Method**: DELETE
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- order_number: UUID of the order to delete
+**Success Response**: 204 No Content
+
+---
+
+## Discount & Promotions
+
+### 1. Create Discount Day (Seller only)
+**Endpoint**: POST {{BASE_URL}}{{API_PREFIX}}/discount-day/
+**Method**: POST
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Body** (raw JSON):
+```json
+{
+  "date": "2025-12-25",
+  "discount_percentage": 20.00
+}
+```
+**Success Response**: 201 Created with discount day data
+
+### 2. List All Discount Days
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/discount-day/
+**Method**: GET
+**Note**: No authentication required
+**Success Response**: 200 OK with list of discount days
+
+### 3. Get Specific Discount Day
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/discount-day/{{discount_day_id}}/
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- discount_day_id: ID of the discount day to retrieve
+**Success Response**: 200 OK with discount day data
+
+### 4. Update Discount Day (Seller only)
+**Endpoint**: PATCH {{BASE_URL}}{{API_PREFIX}}/discount-day/{{discount_day_id}}/
+**Method**: PATCH
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- discount_day_id: ID of the discount day to update
+**Body** (raw JSON):
+```json
+{
+  "discount_percentage": 25.00
+}
+```
+**Success Response**: 200 OK with updated discount day data
+
+### 5. Delete Discount Day (Seller only)
+**Endpoint**: DELETE {{BASE_URL}}{{API_PREFIX}}/discount-day/{{discount_day_id}}/
+**Method**: DELETE
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- discount_day_id: ID of the discount day to delete
+**Success Response**: 204 No Content
+
+---
+
+## Seller Statistics
+
+### 1. Get Seller Statistics
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/seller/stats/
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Query Parameters** (optional):
+- type: "discount" or "non-discount" (default: "discount")
+- date: "YYYY-MM-DD" (for specific date stats, for discount type)
+- start_date: "YYYY-MM-DD" (for non-discount type)
+- end_date: "YYYY-MM-DD" (for non-discount type)
+
+**Success Response**: 200 OK with statistics data
+
+### Examples:
+- All discount day stats: `GET {{BASE_URL}}/api/seller/stats/?type=discount`
+- Specific date discount stats: `GET {{BASE_URL}}/api/seller/stats/?type=discount&date=2025-12-25`
+- Non-discount stats for current month: `GET {{BASE_URL}}/api/seller/stats/?type=non-discount`
+- Non-discount stats for date range: `GET {{BASE_URL}}/api/seller/stats/?type=non-discount&start_date=2025-12-01&end_date=2025-12-31`
+
+### View Products Sold During Discount Days
+The statistics include aggregated data about products sold during discount days:
+
+**Discount Day Statistics Response** will include:
+- Total items sold during discount days
+- Total profit during discount days
+- Total discount amount given
+- Per discount day details including:
+  - Date of discount
+  - Discount percentage
+  - Total items sold on that day
+  - Total profit on that day
+
+**To see specific products** sold during discount days, you would need to:
+1. Create orders on discount day dates
+2. The system automatically marks `is_discount_day=True` on OrderItems that were created on discount day dates
+3. The statistics aggregate these items and show the totals
+4. For detailed product-level information, you would need to query orders manually and filter by discount days
+
+### Detailed Product Sales Information During Discount Days
+You can now view specific products sold during discount days using these endpoints:
+- All products sold during discount days: `GET {{BASE_URL}}/api/seller/stats/?type=discount&view=products`
+- Specific date products sold during discount day: `GET {{BASE_URL}}/api/seller/stats/?type=discount&date=2025-12-25&view=products`
+
+**Response Format** will include:
+- List of products sold during discount days
+- For each product:
+  - Product name and price
+  - Quantity sold per discount day
+  - Revenue generated per discount day
+  - Discount percentage applied per day
+  - Total quantity sold across all discount days
+  - Total revenue across all discount days
+
+---
+
+## Inventory Management
+
+### 1. Restock Product (Seller only)
+**Endpoint**: PATCH {{BASE_URL}}{{API_PREFIX}}/product/{{product_id}}/ (using custom endpoint)
+**Method**: PATCH
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the product to restock
+**Body** (raw JSON):
+```json
+{
+  "restock": 20
+}
+```
+**Success Response**: 200 OK with message and new stock count
+
+### 2. Update Product Stock Directly (Seller only)
+**Endpoint**: PATCH {{BASE_URL}}{{API_PREFIX}}/product/{{product_id}}/ (using custom endpoint)
+**Method**: PATCH
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the product to update
+**Body** (raw JSON):
+```json
+{
+  "stock": 50
+}
+```
+**Success Response**: 200 OK with message and current stock
+
+---
+
+## Expected Responses
+
+### Success Responses
+- **200 OK**: Request successful with data
+- **201 Created**: Resource created successfully
+- **204 No Content**: Request successful, no content to return
+
+### Error Responses
+- **400 Bad Request**: Invalid data provided
+- **401 Unauthorized**: Authentication required
+- **403 Forbidden**: Insufficient permissions
+- **404 Not Found**: Resource not found
+- **409 Conflict**: Request conflicts with current state (e.g., duplicate discount day for same date)
+
+### Common Error Response Format:
+```json
+{
+  "error": "Error message here"
+}
+```
+
+### Authentication Error:
+```json
+{
+  "detail": "Authentication credentials were not provided."
+}
+```
+
+### Validation Error:
+```json
+{
+  "field_name": ["Error message"]
+}
+```
+
+---
+
+## Testing Sequence (Recommended)
+
+1. Register a customer account
+2. Register a seller account
+3. Login as seller
+4. Create products
+5. Create discount days
+6. Logout and login as customer
+7. Create orders (with products that may have discount days)
+8. Test inventory reduction
+9. Login as seller again
+10. Check seller statistics
+11. Update product stock
+12. Test all endpoints with invalid data to verify error handling
+
+## Notes
+- Stock quantities are automatically reduced when orders are placed
+- Discount days only apply to orders placed on the same date
+- Only sellers can create and manage discount days
+- Admin users have additional access to user management endpoints
+- Image uploads for products require form-data instead of JSON
