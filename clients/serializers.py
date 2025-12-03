@@ -2,8 +2,9 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User, Group
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from .models import UserProfile, ShoppingList, ShoppingListItem
+from .models import UserProfile, ShoppingList, ShoppingListItem, Comment
 from products.models import Products, Order
 
 
@@ -152,6 +153,66 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Products
         exclude = ('deleted_at',)  # Exclude the soft delete field from API responses
         read_only_fields = ('user',)
+
+
+class CommentSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    replies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Comment
+        fields = ('id', 'user', 'text', 'created_at', 'updated_at', 'parent', 'replies', 'content_type', 'object_id')
+        read_only_fields = ('user', 'created_at', 'updated_at')
+
+    def get_replies(self, obj):
+        """Recursively get all replies to this comment"""
+        if obj.replies.exists():
+            return CommentSerializer(obj.replies.all(), many=True, context=self.context).data
+        return []
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        validated_data['user'] = user
+        return super().create(validated_data)
+
+
+class CommentCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Comment
+        fields = ('text', 'content_type', 'object_id', 'parent')
+        # content_type and object_id identify what the comment is about (e.g., a product or order)
+
+    def validate(self, attrs):
+        """
+        Check if the user has purchased the product before allowing a comment on it.
+        """
+        user = self.context['request'].user
+        content_type = attrs.get('content_type')
+        object_id = attrs.get('object_id')
+
+        # Check if commenting on a product
+        try:
+            from django.contrib.contenttypes.models import ContentType
+            from products.models import Products
+
+            product_content_type = ContentType.objects.get(app_label='products', model='products')
+
+            if content_type == product_content_type:
+                # Verify the user has purchased this product
+                from products.models import OrderItem
+                has_purchased = OrderItem.objects.filter(
+                    order__user=user,
+                    product_id=object_id
+                ).exists()
+
+                if not has_purchased:
+                    from rest_framework.serializers import ValidationError
+                    raise ValidationError("You can only comment on products you have purchased.")
+
+        except ContentType.DoesNotExist:
+            pass  # If content type doesn't exist, let it pass
+
+        return attrs
 
 
 class OrderSerializer(serializers.ModelSerializer):

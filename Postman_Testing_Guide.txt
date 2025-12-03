@@ -146,8 +146,136 @@ Create a Postman environment with these variables:
 **Path Variables**:
 - product_id: ID of the product to delete
 **Success Response**: 204 No Content
+**Note**: This performs a soft delete (product remains in database but is marked as deleted)
+
+### 7. List Soft Deleted Products (Seller only)
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/auth/seller/products/?deleted=true
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Success Response**: 200 OK with list of soft deleted products only
+**Note**: Only shows products that were soft deleted by this seller
+
+### 8. Get Specific Soft Deleted Product (Seller only)
+**Endpoint**: GET {{BASE_URL}}{{API_PREFIX}}/auth/seller/products/{{product_id}}/?deleted=true
+**Method**: GET
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the soft deleted product to retrieve
+**Success Response**: 200 OK with the soft deleted product data
+**Note**: This endpoint only works for products owned by the authenticated seller
+
+### 9. Restore Soft Deleted Product (Seller only)
+**Endpoint**: PATCH {{BASE_URL}}{{API_PREFIX}}/auth/seller/products/{{product_id}}/
+**Method**: PATCH
+**Headers**:
+- Authorization: Bearer {{TOKEN}}
+**Path Variables**:
+- product_id: ID of the product to restore
+**Body** (raw JSON):
+```json
+{
+  "restore": true
+}
+```
+**Success Response**: 200 OK with restored product data
+**Note**: This restores a soft deleted product, making it active again and available for purchase
 
 ---
+
+## Security and Access Control
+
+The application has different endpoint access levels:
+- **Customer endpoints**: Available to authenticated customers
+- **Seller endpoints**: Available only to authenticated sellers with approval
+- **Admin endpoints**: Available only to administrators
+
+### Customer vs Seller Product Access:
+- Regular customers use: `{{BASE_URL}}{{API_PREFIX}}/product/` endpoints
+- Sellers use: `{{BASE_URL}}{{API_PREFIX}}/auth/seller/products/` endpoints
+- Only sellers can view and restore their soft-deleted products
+- Deleted products are not visible to regular customers
+
+## How to Test the Application in Postman
+
+### Prerequisites
+1. Start your Django server: `python manage.py runserver`
+2. Create a new Postman environment with variables:
+   - `BASE_URL`: http://127.0.0.1:8000
+   - `API_PREFIX`: /api
+
+### Test Sequence - Customer Flow:
+1. **Register Customer**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/auth/` with customer registration data
+
+2. **Login Customer**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/auth/` with login data
+   - Set environment variable `TOKEN` to response.token value
+
+3. **Browse Products**:
+   - GET `{{BASE_URL}}{{API_PREFIX}}/product/` (view all active products)
+
+4. **Use Shopping Lists**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/` (create shopping list)
+   - POST `{{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/{{list_id}}/items/` (add items)
+   - GET `{{BASE_URL}}{{API_PREFIX}}/auth/shopping-lists/` (view your lists)
+
+5. **Place Order**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/orders/` with items and payment info
+
+### Test Sequence - Seller Flow:
+1. **Register Seller**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/auth/seller/register/` with seller data
+   - Note: Seller needs admin approval before selling
+
+2. **Login Seller**:
+   - Use the token from registration or login after account is approved
+
+3. **Create Products**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/auth/seller/products/` with product data
+
+4. **Create Discount Days**:
+   - POST `{{BASE_URL}}{{API_PREFIX}}/discount-day/` with date and discount data
+
+5. **Soft Delete a Product**:
+   - DELETE `{{BASE_URL}}{{API_PREFIX}}/auth/seller/products/{{product_id}}/`
+   - Verify product is no longer in GET `/api/auth/seller/products/`
+
+6. **View Soft-Deleted Products**:
+   - GET `{{BASE_URL}}{{API_PREFIX}}/auth/seller/products/?deleted=true`
+   - Should return only soft-deleted products
+
+7. **Retrieve Specific Deleted Product**:
+   - GET `{{BASE_URL}}{{API_PREFIX}}/auth/seller/products/{{product_id}}/?deleted=true`
+
+8. **Restore Soft-Deleted Product**:
+   - PATCH `{{BASE_URL}}{{API_PREFIX}}/auth/seller/products/{{product_id}}/`
+   - Body: `{"restore": true}`
+
+9. **Check Seller Statistics**:
+   - GET `{{BASE_URL}}{{API_PREFIX}}/seller/stats/?type=discount`
+   - GET `{{BASE_URL}}{{API_PREFIX}}/seller/stats/?type=discount&view=products`
+
+### Test Security Features:
+1. **Verify customers can't see deleted products**:
+   - Try GET `{{BASE_URL}}{{API_PREFIX}}/product/?deleted=true` as customer
+   - Should not return deleted products
+
+2. **Verify sellers can't access others' deleted products**:
+   - Login as Seller A, create and delete a product
+   - Login as Seller B, try to access Seller A's deleted product
+   - Should return 404 or access denied
+
+3. **Verify unauthorized access is blocked**:
+   - Try accessing seller endpoints without authentication
+   - Should return 401 Unauthorized
+
+### Error Testing:
+1. Try creating order with insufficient stock
+2. Try setting discount day in the past
+3. Try creating duplicate discount days for same date
+4. Try accessing another seller's products
 
 ## Shopping Lists & Cart Management (Customer only)
 

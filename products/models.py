@@ -4,6 +4,20 @@ from django.conf import settings
 from django.utils import timezone
 from clients.models import UserProfile
 
+
+class SoftDeleteManager(models.Manager):
+    """Custom manager that excludes soft deleted objects by default"""
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+    def all_with_deleted(self):
+        """Return all objects including soft deleted ones"""
+        return super(SoftDeleteManager, self).get_queryset().all()
+
+    def only_deleted(self):
+        """Return only soft deleted objects"""
+        return super().get_queryset().filter(deleted_at__isnull=False)
+
 # Create your models here.
 
 
@@ -33,17 +47,9 @@ class Products(models.Model):
     # Soft delete field
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    """
-     add null true and black true if
-
-     Please select a fix:
-     1) Provide a one-off default now (will be set on all existing rows with a null value for this column)
-      2) Quit and manually define a default value in models.py.
-     Select an option:
-    """
-
-    # """ can be use to doc string or multi comment
-
+    # Use custom manager with soft delete
+    objects = SoftDeleteManager()  # Only active products (excludes soft deleted)
+    all_objects = models.Manager()  # All products (includes soft deleted)
 
     def __str__(self):
         return f"Product Name: {self.name} Price: {self.price} Status: {self.status}"
@@ -52,19 +58,22 @@ class Products(models.Model):
         """Soft delete: set deleted_at timestamp instead of removing from db"""
         if soft:
             self.deleted_at = timezone.now()
-            self.save()
+            return self.save()
         else:
-            super().delete(*args, **kwargs)
+            return super().delete(*args, **kwargs)
+
+    @classmethod
+    def get_deleted_products_for_user(cls, user):
+        """Class method to get soft deleted products for a specific user"""
+        return cls.all_objects.filter(
+            user=user,
+            deleted_at__isnull=False
+        )
 
     def restore(self):
         """Restore a soft deleted product"""
         self.deleted_at = None
         self.save()
-
-    @classmethod
-    def all_objects(cls):
-        """Return all products, including soft deleted ones"""
-        return cls.objects.all()
 
     @classmethod
     def objects_active(cls):
@@ -138,7 +147,7 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"Product: {self.product} Subtotal: {self.sub_total}"
-    
+
 
 
 class Order(models.Model):
@@ -169,9 +178,36 @@ class Order(models.Model):
     # Add user relationship to track who placed the order
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True)
     order_item = models.ManyToManyField(OrderItem)
+    # Add payment status field
+    is_paid = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Order {self.number} - Status: {self.status}"
+
+    @property
+    def total_amount(self):
+        """
+        Calculate the total amount of all order items in this order.
+        This uses the final_sub_total of each OrderItem to account for discounts
+        """
+        total = sum(item.final_sub_total for item in self.order_item.all())
+        return total
+
+    @property
+    def total_original_amount(self):
+        """
+        Calculate the total original amount (without discounts) of all order items in this order.
+        """
+        total = sum(item.original_sub_total for item in self.order_item.all())
+        return total
+
+    @property
+    def total_discount_amount(self):
+        """
+        Calculate the total discount amount applied in this order.
+        """
+        total = sum(item.discount_amount for item in self.order_item.all())
+        return total
 
 
 

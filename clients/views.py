@@ -5,13 +5,15 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Q
 from django.http import HttpResponse
+from django.utils import timezone
 
-from .models import UserProfile, ShoppingList, ShoppingListItem
+from .models import UserProfile, ShoppingList, ShoppingListItem, Comment
 from .serializers import (
     UserRegistrationSerializer, UserLoginSerializer, UserSerializer,
     ShoppingListSerializer, ShoppingListDetailSerializer,
     ShoppingListItemSerializer, ProductSerializer, OrderSerializer,
-    SellerApprovalSerializer, AdminUserManagementSerializer
+    SellerApprovalSerializer, AdminUserManagementSerializer,
+    CommentSerializer, CommentCreateSerializer
 )
 from products.models import Products, Order, OrderItem
 
@@ -22,6 +24,14 @@ User = get_user_model()
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {"refresh": str(refresh), "access": str(refresh.access_token)}
+
+
+def is_admin(user):
+    """Helper function to check if user is admin"""
+    try:
+        return user.userprofile.role == 'admin'
+    except UserProfile.DoesNotExist:
+        return False
 
 
 # Custom permission mixin (replaces all your is_customer/is_seller/is_admin checks)
@@ -168,18 +178,149 @@ class ShoppingListItemDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 # ==================== SELLER - PRODUCTS & ORDERS ====================
-class SellerProductView(generics.ListCreateAPIView, generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = ProductSerializer
+class SellerProductView(views.APIView):
     permission_classes = [IsSeller]
 
-    def get_queryset(self):
-        return Products.objects.filter(user=self.request.user, deleted_at__isnull=True)
+    def get(self, request, pk=None):
+        if pk:
+            # Handle single product retrieval
+            show_deleted = request.query_params.get('deleted', '').lower() == 'true'
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+            if show_deleted:
+                # Try to get the deleted product owned by this seller
+                try:
+                    product = Products._default_manager.get(
+                        id=pk,
+                        user=request.user,
+                        deleted_at__isnull=False
+                    )
+                    serializer = ProductSerializer(product)
+                    return Response(serializer.data)
+                except Products.DoesNotExist:
+                    return Response({'error': 'Deleted product not found'}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Get active product
+                try:
+                    product = Products.objects.get(id=pk, user=request.user)
+                    serializer = ProductSerializer(product)
+                    return Response(serializer.data)
+                except Products.DoesNotExist:
+                    return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            # Handle list of products
+            show_deleted = request.query_params.get('deleted', '').lower() == 'true'
+            if show_deleted:
+                # Show only deleted products with explicit query
+                products = Products._default_manager.filter(
+                    user=request.user,
+                    deleted_at__isnull=False
+                )
+                print(f"DEBUG: Found {products.count()} deleted products for user {request.user.id}")
+            else:
+                # Show only active products
+                products = Products.objects.filter(user=request.user)
+                print(f"DEBUG: Found {products.count()} active products for user {request.user.id}")
 
-    def perform_destroy(self, instance):
-        instance.delete(soft=True)  # soft delete
+            serializer = ProductSerializer(products, many=True)
+            return Response(serializer.data)
+
+    def post(self, request):
+        # Create product with explicit user assignment
+        try:
+            # Create product instance without saving to DB yet
+            serializer = ProductSerializer(data=request.data)
+            if serializer.is_valid():
+                # Save the product first
+                product = serializer.save()
+                # Then explicitly assign the user and save again
+                product.user = request.user
+                product.save()
+
+                # Verify the user assignment worked
+                if product.user != request.user:
+                    print(f"ERROR: User assignment failed. Expected {request.user.id}, got {product.user.id if product.user else None}")
+
+                # Return the fully updated product data
+                return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(f"ERROR creating product: {str(e)}")
+            return Response({'error': 'Failed to create product', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, pk):
+        # Update product
+        try:
+            product = Products.objects.get(id=pk, user=request.user)
+            serializer = ProductSerializer(product, data=request.data)
+            if serializer.is_valid():
+                updated_product = serializer.save()
+                # Ensure user remains the same after update
+                if updated_product.user != request.user:
+                    updated_product.user = request.user
+                    updated_product.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Products.DoesNotExist:
+            return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    def patch(self, request, pk):
+        # Handle product restoration from soft delete
+        if 'restore' in request.data and request.data['restore'] is True:
+            try:
+                product = Products._default_manager.get(
+                    id=pk,
+                    user=request.user,
+                    deleted_at__isnull=False
+                )
+                # Perform restore explicitly
+                product.deleted_at = None
+                product.save()
+                serializer = ProductSerializer(product)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except Products.DoesNotExist:
+                return Response(
+                    {'error': 'Deleted product not found or already active'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            # Regular partial update
+            try:
+                product = Products.objects.get(id=pk, user=request.user)
+                serializer = ProductSerializer(product, data=request.data, partial=True)
+                if serializer.is_valid():
+                    updated_product = serializer.save()
+                    # Ensure user remains the same after partial update
+                    if updated_product.user != request.user:
+                        updated_product.user = request.user
+                        updated_product.save()
+                    # Update status based on stock if stock was updated
+                    if 'stock' in request.data:
+                        if updated_product.stock > 0:
+                            updated_product.status = updated_product.StatusofProduct.AVAILABLE
+                        else:
+                            updated_product.status = updated_product.StatusofProduct.OUT_OF_STOCK
+                        updated_product.save()
+                    return Response(serializer.data)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            except Products.DoesNotExist:
+                return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, pk):
+        # Soft delete product
+        try:
+            # First, check if the product exists for this user (regardless of delete status)
+            product = Products._default_manager.get(id=pk, user=request.user)
+
+            # If the product is already deleted, return appropriate message
+            if product.deleted_at is not None:
+                return Response({'message': 'Product is already soft deleted'}, status=status.HTTP_200_OK)
+
+            # Perform soft delete explicitly
+            product.deleted_at = timezone.now()
+            product.save()
+            return Response({'message': 'Product soft deleted successfully'}, status=status.HTTP_200_OK)
+        except Products.DoesNotExist:
+            return Response({'error': 'Product not found or does not belong to you'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class SellerOrderListView(generics.ListAPIView):
@@ -349,3 +490,68 @@ class AdminUserView(generics.ListCreateAPIView, generics.UpdateAPIView):
 
         # Otherwise, handle normal user update
         return super().update(request, *args, **kwargs)
+
+
+# ==================== COMMENTS ====================
+class CommentView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return CommentCreateSerializer
+        return CommentSerializer
+
+    def get_queryset(self):
+        """
+        Get comments for a specific object (e.g., product, order) using content_type and object_id
+        Query parameters: content_type (model name) and object_id
+        """
+        content_type_param = self.request.query_params.get('content_type')
+        object_id_param = self.request.query_params.get('object_id')
+
+        if content_type_param and object_id_param:
+            try:
+                content_type = ContentType.objects.get(model=content_type_param)
+                return Comment.objects.filter(
+                    content_type=content_type,
+                    object_id=object_id_param,
+                    parent__isnull=True  # Only top-level comments, replies are nested
+                ).select_related('user')
+            except ContentType.DoesNotExist:
+                return Comment.objects.none()
+        else:
+            # If no content_type and object_id provided, return all comments by the user
+            return Comment.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        content_type = serializer.validated_data.get('content_type')
+        object_id = serializer.validated_data.get('object_id')
+
+        # Additional check to ensure user has purchased the product
+        try:
+            product_content_type = ContentType.objects.get(app_label='products', model='products')
+
+            if content_type == product_content_type:
+                from products.models import OrderItem
+                has_purchased = OrderItem.objects.filter(
+                    order__user=user,
+                    product_id=object_id
+                ).exists()
+
+                if not has_purchased:
+                    from rest_framework.exceptions import ValidationError
+                    raise ValidationError("You can only comment on products you have purchased.")
+
+        except ContentType.DoesNotExist:
+            pass  # If content type doesn't exist, let it pass
+
+        serializer.save(user=user)
+
+
+class CommentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = CommentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Comment.objects.filter(user=self.request.user)

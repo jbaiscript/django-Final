@@ -18,9 +18,10 @@ from django.contrib import admin
 from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
-from products.views import ProductView, ProductRetriveUpdateDelete, CustomerOrderView, PaymentView
+from products.views import ProductView, ProductRetriveUpdateDelete, CustomerOrderView, PaymentView, SoftDeletedProductsView, RestoreProductView
 from discounts.views import DiscountDayView, DiscountDayDetailView, SellerStatsView
 from clients import views as client_views
+from clients.debug_views import DebugSoftDeleteView, TestUserAssignmentView
 
 
 urlpatterns = [
@@ -42,6 +43,10 @@ urlpatterns = [
     path('api/auth/shopping-lists/<int:shopping_list_id>/items/', client_views.ShoppingListItemView.as_view()),
     path('api/auth/shopping-lists/<int:shopping_list_id>/items/<int:pk>/', client_views.ShoppingListItemDetailView.as_view()),
 
+    # Comments endpoints
+    path('api/comments/', client_views.CommentView.as_view()),
+    path('api/comments/<int:pk>/', client_views.CommentDetailView.as_view()),
+
     # Seller endpoints
     path('api/auth/seller/register/', client_views.SellerRegistrationView.as_view()),
     path('api/auth/seller/products/', client_views.SellerProductView.as_view()),
@@ -49,13 +54,18 @@ urlpatterns = [
     path('api/auth/seller/orders/', client_views.SellerOrderListView.as_view()),
     path('api/auth/seller/orders/<uuid:pk>/', client_views.SellerOrderDetailView.as_view()),
 
-    # Admin 
+    # Admin
     path('api/auth/admin/users/', client_views.AdminUserView.as_view()),
 
     # Discount Path
     path('api/discount-day/', DiscountDayView.as_view()),
     path('api/discount-day/<int:pk>/', DiscountDayDetailView.as_view()),
     path('api/seller/stats/', SellerStatsView.as_view()),  # Use the original view for stats
+
+    # Soft delete product endpoints
+    path('api/products/deleted/', SoftDeletedProductsView.as_view(), name='soft-deleted-products'),
+    path('api/product/<int:pk>/restore/', RestoreProductView.as_view(), name='restore-product'),
+
 ]
 
 """generic foreing key in django for comments"""

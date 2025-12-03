@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 class ProductSerializer(serializers.ModelSerializer):
     user_id = serializers.ReadOnlyField(source='user.id')
     store_owner = serializers.ReadOnlyField(source='user.username')
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, write_only=True)
 
     class Meta:
         model = Products
@@ -19,11 +20,22 @@ class ProductSerializer(serializers.ModelSerializer):
             'price',
             'stock',
             'status',
+            'user',  # Add user field so it can be set during creation
             'user_id',
             'store_owner',
             'deleted_at'
         )
         read_only_fields = ('deleted_at',)
+
+    def create(self, validated_data):
+        # Remove user from validated_data if it exists, we'll set it manually in the view
+        validated_data.pop('user', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Remove user from validated_data if it exists, maintain original user
+        validated_data.pop('user', None)
+        return super().update(instance, validated_data)
 
     def sanitize_string_field(self, value):
         """Sanitize string field by removing extra whitespace and normalizing"""
@@ -63,12 +75,12 @@ class StrippedCharField(serializers.CharField):
 
     def to_internal_value(self, data):
         original_value = super().to_internal_value(data)
-        
+
         if isinstance(original_value, str):
             # Removes ALL whitespace (including between words) → "  Hello   World  " becomes "HelloWorld"
             cleaned_value = ''.join(original_value.split())
             return cleaned_value
-        
+
         return original_value
 
 
@@ -88,6 +100,23 @@ class PaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Card number cannot start with 0000")
 
         return value
+
+    def validate(self, attrs):
+        """
+        Custom validation to ensure that card number is required for non-COD payments
+        """
+        payment_method = attrs.get('payment')
+        card_number = attrs.get('card_number')
+
+        # If payment method is not COD, card number is required
+        if payment_method and payment_method != Order.PaymentChoice.COD and not card_number:
+            raise serializers.ValidationError('Card number is required for this payment method.')
+
+        # If payment method is COD, no card number should be provided
+        if payment_method == Order.PaymentChoice.COD and card_number:
+            raise serializers.ValidationError('Card number is not required for Cash on Delivery.')
+
+        return attrs
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -136,12 +165,14 @@ class OrderItemCreateSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     order_items = OrderItemSerializer(many=True, read_only=True, source='order_item')
     items = OrderItemCreateSerializer(many=True, write_only=True)  # Accept items in request
-    card_number = serializers.CharField(max_length=16, min_length=16, required=False, write_only=True)
+    total_amount = serializers.ReadOnlyField()
+    total_original_amount = serializers.ReadOnlyField()
+    total_discount_amount = serializers.ReadOnlyField()
 
     class Meta:
         model = Order
-        fields = ('number', 'created_at', 'updated_at', 'status', 'payment', 'user', 'order_items', 'items', 'card_number')
-        read_only_fields = ('user',)  # Make user read-only since it's set by the view
+        fields = ('number', 'created_at', 'updated_at', 'status', 'payment', 'user', 'order_items', 'items', 'total_amount', 'total_original_amount', 'total_discount_amount', 'is_paid')
+        read_only_fields = ('user', 'is_paid')  # Make user and is_paid read-only since they're set by the view
 
     def validate_card_number(self, value):
         """Check if the credit card number is exactly 16 digits"""
@@ -169,5 +200,16 @@ class OrderSerializer(serializers.ModelSerializer):
         order.order_item.set(order_items)
 
         return order
+
+    def update(self, instance, validated_data):
+        # Only allow updates for status and payment fields
+        status = validated_data.get('status', instance.status)
+        payment = validated_data.get('payment', instance.payment)
+
+        instance.status = status
+        instance.payment = payment
+        instance.save()
+
+        return instance
 
 

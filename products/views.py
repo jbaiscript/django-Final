@@ -60,23 +60,25 @@ class ProductView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request):
-        # Only return non-deleted products
-        products = Products.objects.filter(deleted_at__isnull=True)
+        # Only return non-deleted products - use default manager to avoid conflicts
+        products = Products.objects.filter(deleted_at__isnull=True)  # This uses SoftDeleteManager by default
         view = ProductSerializer(products, many=True)
         return Response(view.data)
 
 
 class ProductRetriveUpdateDelete(APIView):
     def get(self, request, pk):
-        try:
-            # Only return non-deleted products
-            product = Products.objects.filter(id=pk, deleted_at__isnull=True).first()
-            if product is None:
-                return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-            serializer = ProductSerializer(product)
-            return Response(serializer.data)
-        except Products.DoesNotExist:
+        # Regular product endpoint - only shows non-deleted products to customers
+        # Customers should not see deleted products
+        product = Products.objects.filter(  # This is SoftDeleteManager which filters out deleted by default
+            id=pk,
+            deleted_at__isnull=True
+        ).first()
+        if product is None:
             return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProductSerializer(product)
+        return Response(serializer.data)
 
     def put(self, request, pk):
         try:
@@ -134,17 +136,34 @@ class ProductRetriveUpdateDelete(APIView):
 class OrderView(APIView):
     permission_classes = [IsAuthenticated]  # Require authentication to place orders
 
-    def post(self, request):
-        # Validate that card number is provided
-        card_number = request.data.get('card_number')
-        if card_number is None:
-            return Response({'message': 'Please input Credit Card No'})
+    def get(self, request, order_number=None):
+        """
+        Get a specific order if order_number is provided, or all orders of the authenticated user
+        """
+        if order_number:
+            try:
+                order = Order.objects.get(number=order_number, user=request.user)
+                serializer = OrderSerializer(order)
+                return Response(serializer.data)
+            except Order.DoesNotExist:
+                return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            # Get all orders for the current user
+            orders = Order.objects.filter(user=request.user).order_by('-created_at')
+            serializer = OrderSerializer(orders, many=True)
+            return Response(serializer.data)
 
-        # Prepare order data (excluding items and card_number)
+    def post(self, request):
+        # Prepare order data (excluding items)
         order_data = {
             'user': request.user,
-            'payment': request.data.get('payment', 'Cash on Delivery'),  # Default payment method
+            'payment': request.data.get('payment', Order.PaymentChoice.COD),  # Default payment method
         }
+
+        # Validate payment method
+        payment_method = request.data.get('payment', Order.PaymentChoice.COD)
+        if payment_method not in [choice[0] for choice in Order.PaymentChoice.choices]:
+            return Response({'error': 'Invalid payment method'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Create the order
         order = Order.objects.create(**order_data)
@@ -218,6 +237,54 @@ class OrderView(APIView):
         # Serialize the created order for response
         response_serializer = OrderSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def put(self, request, order_number):
+        """
+        Update an existing order for authenticated user. Only allows updating status and payment method.
+        Order items cannot be modified after creation to maintain order integrity.
+        """
+        try:
+            order = Order.objects.get(number=order_number, user=request.user)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only allow updating of specific fields (not order items)
+        allowed_fields = ['status', 'payment']
+        update_data = {}
+
+        for field in allowed_fields:
+            if field in request.data:
+                update_data[field] = request.data[field]
+
+        serializer = OrderSerializer(order, data=update_data, partial=False)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, order_number):
+        """
+        Partially update an existing order for authenticated user. Only allows updating status and payment method.
+        Order items cannot be modified after creation to maintain order integrity.
+        """
+        try:
+            order = Order.objects.get(number=order_number, user=request.user)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only allow updating of specific fields (not order items)
+        allowed_fields = ['status', 'payment']
+        update_data = {}
+
+        for field in allowed_fields:
+            if field in request.data:
+                update_data[field] = request.data[field]
+
+        serializer = OrderSerializer(order, data=update_data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CustomerOrderView(APIView):
@@ -239,16 +306,16 @@ class CustomerOrderView(APIView):
             return Response(serializer.data)
 
     def post(self, request):
-        # Validate that card number is provided
-        card_number = request.data.get('card_number')
-        if card_number is None:
-            return Response({'message': 'Please input Credit Card No'})
-
-        # Prepare order data (excluding items and card_number)
+        # Prepare order data (excluding items)
         order_data = {
             'user': request.user,
-            'payment': request.data.get('payment', 'Cash on Delivery'),  # Default payment method
+            'payment': request.data.get('payment', Order.PaymentChoice.COD),  # Default payment method
         }
+
+        # Validate payment method
+        payment_method = request.data.get('payment', Order.PaymentChoice.COD)
+        if payment_method not in [choice[0] for choice in Order.PaymentChoice.choices]:
+            return Response({'error': 'Invalid payment method'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Create the order
         order = Order.objects.create(**order_data)
@@ -323,6 +390,54 @@ class CustomerOrderView(APIView):
         response_serializer = OrderSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
+    def put(self, request, order_number):
+        """
+        Update an existing order. Only allows updating status and payment method.
+        Order items cannot be modified after creation to maintain order integrity.
+        """
+        try:
+            order = Order.objects.get(number=order_number, user=request.user)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only allow updating of specific fields (not order items)
+        allowed_fields = ['status', 'payment']
+        update_data = {}
+
+        for field in allowed_fields:
+            if field in request.data:
+                update_data[field] = request.data[field]
+
+        serializer = OrderSerializer(order, data=update_data, partial=False)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, order_number):
+        """
+        Partially update an existing order. Only allows updating status and payment method.
+        Order items cannot be modified after creation to maintain order integrity.
+        """
+        try:
+            order = Order.objects.get(number=order_number, user=request.user)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only allow updating of specific fields (not order items)
+        allowed_fields = ['status', 'payment']
+        update_data = {}
+
+        for field in allowed_fields:
+            if field in request.data:
+                update_data[field] = request.data[field]
+
+        serializer = OrderSerializer(order, data=update_data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     def delete(self, request, order_number):
         try:
             order = Order.objects.get(number=order_number, user=request.user)
@@ -333,14 +448,77 @@ class CustomerOrderView(APIView):
 
 
 class PaymentView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
-        serializer = PaymentSerializer(data=request.data)
-        if serializer.is_valid():
-            card_number = serializer.validated_data.get('card_number')
-            if card_number is None:
-                return Response({'message': 'Please input creadit card No.'})
-            return Response({'message': 'Payment processed successfully'}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        order_number = request.data.get('order_number')
+        amount_paid = request.data.get('amount')
+        card_number = request.data.get('card_number')
+
+        if not order_number:
+            return Response({'error': 'Order number is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not amount_paid:
+            return Response({'error': 'Amount is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Convert amount to decimal for comparison
+            from decimal import Decimal
+            amount_paid = Decimal(str(amount_paid))
+
+            # Get the order
+            order = Order.objects.get(number=order_number, user=request.user)
+
+            # Get the total amount for this order
+            total_amount = order.total_amount
+
+            # Check if the amount paid is at least the total amount
+            if amount_paid < total_amount:
+                return Response({
+                    'error': f'Payment amount is less than order total. Required: {total_amount}, Provided: {amount_paid}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate payment method specific requirements
+            if order.payment == Order.PaymentChoice.COD:
+                # For Cash on Delivery, no card number is required
+                if card_number:
+                    return Response({
+                        'error': f'Card number is not required for {order.payment}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # For non-COD payments, card number is required
+                if not card_number:
+                    return Response({
+                        'error': f'Card number is required for {order.payment}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Validate card number format (16 digits)
+                if not isinstance(card_number, str) or len(card_number.replace(' ', '')) != 16 or not card_number.replace(' ', '').isdigit():
+                    return Response({
+                        'error': 'Card number must be exactly 16 digits'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Process the payment
+            order.is_paid = True
+            # Optionally update status to reflect payment
+            if order.status == 'Pending':
+                order.status = 'On Delivery'
+            order.save()
+
+            return Response({
+                'message': 'Payment processed successfully',
+                'order_number': order_number,
+                'total_amount': total_amount,
+                'is_paid': True,
+                'payment_method': order.payment
+            }, status=status.HTTP_200_OK)
+
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError:
+            return Response({'error': 'Invalid amount format'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': f'Payment processing error: {str(e)}'}, status=status.HTTP_500_INTERNAL_ERROR)
 
 
 class InventoryUpdateView(APIView):
@@ -386,3 +564,48 @@ class InventoryUpdateView(APIView):
             return Response({'error': 'Product not found or unauthorized'}, status=status.HTTP_404_NOT_FOUND)
         except ValueError:
             return Response({'error': 'Stock value must be a valid number'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SoftDeletedProductsView(APIView):
+    """View to handle soft deleted products"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Retrieve soft deleted products for the authenticated user"""
+        # Only show soft deleted products that belong to the current user
+        deleted_products = Products.get_deleted_products_for_user(request.user)
+        serializer = ProductSerializer(deleted_products, many=True)
+        return Response(serializer.data)
+
+
+class RestoreProductView(APIView):
+    """View to restore soft deleted products"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        """Restore a soft deleted product"""
+        try:
+            # Find the soft deleted product that belongs to the user
+            product = Products.all_objects.get(id=pk, user=request.user)
+
+            # Check if the product is actually deleted
+            if product.deleted_at is None:
+                return Response(
+                    {'error': 'Product is not soft deleted'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Restore the product
+            product.restore()
+
+            serializer = ProductSerializer(product)
+            return Response({
+                'message': 'Product restored successfully',
+                'product': serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except Products.DoesNotExist:
+            return Response(
+                {'error': 'Product not found or unauthorized'},
+                status=status.HTTP_404_NOT_FOUND
+            )
